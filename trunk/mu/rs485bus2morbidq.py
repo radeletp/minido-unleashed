@@ -30,7 +30,7 @@
 ###############################################################################
 
 from __future__ import print_function
-from twisted.internet.protocol import Protocol, ReconnectingClientFactory
+from twisted.internet.protocol import ReconnectingClientFactory
 from twisted.internet import reactor
 from twisted.web import xmlrpc, server
 from sys import stdout
@@ -52,134 +52,23 @@ import time
 import textwrap
 import traceback
 
-CONNTYPE = 'Socket'
+# Minido
+from minido.protocol import MinidoProtocol
+
 MINIDO_ADAPTER_HOST = 'minidoadt'
 MINIDO_ADAPTER_PORT = 23
 MORBIDQ_HOST = 'localhost'
 MORBIDQ_PORT = 61613
 CHANNEL_MINIDO_WRITE= "/mu/write"
 CHANNEL_MINIDO_READ= "/mu/read"
-HIST = 5
-SQLITEDB = "minido_unleashed.db"
-EXIID = 0x17
-
-# Never change the following values, it's only for clarity :
-EXOOFFSET = 0x3B
-EXIOFFSET = 0x13
-CMD = {
-    'EXO_UPDATE': 0x01,
-    'ECHO_REPLY': 0x05,
-    'EXICENT'   : 0x31,
-    'ECHO REQUEST': 0x49,
-    }
-DST = 1
-SRC = 2
-LEN = 3
-COM = 4
-
-
-def checksum(datalist):
-    """ Calculate an XOR checksum """
-    checksum_ = 0
-    for item in datalist:
-        checksum_ ^= item
-    return checksum_
-
-class MinidoProtocol(Protocol):
-    ''' Bus protocol, also used for Minido, D2000 and C2000 '''
-    chardata = list()
-
-    def __init__(self):
-        # self.factory = factory
-        print('MinidoProtocol initialized')
-
-    def connectionMade(self):
-        self.factory.connection = self
-
-    def newpacket(self, data):
-        """ Called when a new packet is validated """
-        self.factory.morbidqFactory.send_data(data)
-
-    def send_data(self, data):
-        if data[len(data)-1] == checksum( data[4:(len(data)-1)]):
-            print(str(datetime.datetime.now()) + " : ",
-                ' '.join([ '%0.2x' % c for c in data ]))
-            packet = ''.join([chr(x) for x in data])
-            self.transport.write(packet)
-        else:
-            # First check if the packet is complete, 
-            # and build the missing checksum.
-            if len(data) == data[3] + 3:
-                print(str(datetime.datetime.now()) + " :",
-                    "Adding the missing checksum")
-                data.append(checksum ( data[4:(len(data))] ))
-                packet = ''.join([chr(x) for x in data])
-                self.transport.write(packet)
-
-            else:
-                print(str(datetime.datetime.now()) + " : " + 
-                    'Bad checksum for packet : ' + str(' '.join(
-                    [ '%0.2x' % c for c in data ])))
-
-    def dataReceived(self, chardata):
-        """ This method is called by Twisted  """
-        self.chardata.extend(chardata)
-            
-        while len(self.chardata) >= 6:
-            if ord(self.chardata[0]) != 0x23:
-                startidx = 0
-                try:
-                    startidx = self.chardata.index(chr(0x23))
-                except(LookupError, ValueError):
-                    # We did not find 0x23
-                    # We are not interested in data not starting by 0x23.
-                    print(str(datetime.datetime.now()) +
-                        " Error : none is 0x23. Dropping everything.")
-                    print(str([ord(x) for x in self.chardata]))
-                    self.chardata = list()
-                    continue
-
-                if startidx != 0:
-                    print('Deleting first characters : StartIDX : ', startidx)
-                    self.chardata = self.chardata[startidx:]
-                    continue
-            else:
-                """ We have a valid begining """
-                datalength = ord(self.chardata[3])
-                if len(self.chardata) >= datalength + 4:
-                    """ We have at least a complete packet"""
-                    if checksum(
-                        [ord(x) for x in self.chardata[4:datalength + 3]]
-                        ) != ord(self.chardata[datalength + 3]):
-                        print("Warning : Invalid checksum for packet : "
-                            + str( [ord(x) for x in self.chardata] ))
-                        validpacket = self.chardata[0:datalength + 4]
-                        self.chardata = self.chardata[datalength + 4:]
-                        continue
-                    else:
-                        validpacket = self.chardata[0:datalength + 4]
-                        self.chardata = self.chardata[datalength + 4:]
-                    # OK, I have now a nice, beautiful, valid packet
-                    data = [ord(x) for x in validpacket]
-                    print(str(datetime.datetime.now()) + " : RS485 to STOMP : " + str(data))
-                    self.newpacket(data)
-                else:
-                    #print("Debug packet : " + str(map(lambda x: ord(x), self.chardata)))
-                    #print("Debug ord(self.chardata[3]) : " + str(datalength))
-                    break
-
 
 class MinidoClientFactory(ReconnectingClientFactory):
-    protocol = MinidoProtocol
-
     def startedConnecting(self, connector):
         print('Started to connect.')
 
-#    def buildProtocol(self, addr):
-#        print('Connected.')
-#        print('Resetting reconnection delay')
-#        self.resetDelay()
-#        return self.protocol()
+    def buildProtocol(self, addr):
+        return MinidoProtocol(self)
+
 
     def clientConnectionLost(self, connector, reason):
         print('Lost connection.  Reason:', reason)
@@ -201,11 +90,13 @@ class MorbidQClientFactory(StompClientFactory):
         if msg['headers']['destination'] == CHANNEL_MINIDO_WRITE:
             if type(message) is list:
                 print(str(datetime.datetime.now()), ": STOMP to RS485 :", message)
-                self.minidoFactory.connection.send_data(message)
+                for conn in self.minidoFactory.connections:
+                    conn.send_data(message)
                 # Also copy it for other listeners.
                 self.send(CHANNEL_MINIDO_READ, json.encode(message))
  
     def send_data(self, data):
+        print(str(datetime.datetime.now()) + " : RS485 to STOMP : " + str(data))
         self.send(CHANNEL_MINIDO_READ, json.encode(data))
  
 

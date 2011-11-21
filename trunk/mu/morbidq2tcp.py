@@ -30,26 +30,20 @@
 ###############################################################################
 
 from __future__ import print_function
-from twisted.internet.protocol import Protocol, Factory
+from twisted.internet.protocol import Factory
 from twisted.internet import reactor
-from twisted.web import xmlrpc, server
-from sys import stdout
-from threading import Thread, Timer
-from SimpleXMLRPCServer import SimpleXMLRPCServer
-from collections import deque
-from Queue import Queue
 
 # MorbidQ
 from stompservice import StompClientFactory
-from twisted.internet.task import LoopingCall
 from random import random
 from orbited import json
 
 # Other imports
 import datetime
 import time
-import textwrap
-import traceback
+
+# minido
+from minido.protocol import *
 
 MINIDO_ADAPTER_HOST = 'localhost'
 MINIDO_ADAPTER_PORT = 2323
@@ -74,102 +68,6 @@ DST = 1
 SRC = 2
 LEN = 3
 COM = 4
-
-
-def checksum(datalist):
-    """ Calculate an XOR checksum """
-    checksum_ = 0
-    for item in datalist:
-        checksum_ ^= item
-    return checksum_
-
-class MinidoProtocol(Protocol):
-    ''' Bus protocol, also used for Minido, D2000 and C2000 '''
-    chardata = list()
-    def __init__(self, factory):
-        self.factory = factory
-
-    def connectionMade(self):
-        print(str(datetime.datetime.now()) + " :",
-            "New connection from :", self.transport.getPeer())
-        self.factory.connections.append(self)
-
-    def connectionLost(self, reason):
-        self.factory.connections.remove(self)
-        print(str(datetime.datetime.now()) + " :",
-            "Lost connection from : ", self.transport.getPeer(), reason)
-
-    def newpacket(self, data):
-        """ Called when a new packet is validated """
-        self.factory.morbidqFactory.send_data(data)
-
-    def send_data(self, data):
-        if data[len(data)-1] == checksum( data[4:(len(data)-1)]):
-            packet = ''.join([chr(x) for x in data])
-            self.transport.write(packet)
-        else:
-            # First check if the packet is complete, 
-            # and build the missing checksum.
-            if len(data) == data[3] + 3:
-                print(str(datetime.datetime.now()) + " :",
-                    "Adding the missing checksum")
-                data.append(checksum ( data[4:(len(data))] ))
-                packet = ''.join([chr(x) for x in data])
-                self.transport.write(packet)
-
-            else:
-                print(str(datetime.datetime.now()) + " : " + 
-                    'Bad checksum for packet : ' + str(' '.join(
-                    [ '%0.2x' % c for c in data ])))
-
-    def dataReceived(self, chardata):
-        """ This method is called by Twisted  """
-        self.chardata.extend(chardata)
-            
-        while len(self.chardata) >= 6:
-            if ord(self.chardata[0]) != 0x23:
-                startidx = 0
-                try:
-                    startidx = self.chardata.index(chr(0x23))
-                except(LookupError, ValueError):
-                    # We did not find 0x23
-                    # We are not interested in data not starting by 0x23.
-                    print(str(datetime.datetime.now()) +
-                        " Error : none is 0x23. Dropping everything.")
-                    print(str([ord(x) for x in self.chardata]))
-                    self.chardata = list()
-                    continue
-
-                if startidx != 0:
-                    print('Deleting first characters : StartIDX : ', startidx)
-                    self.chardata = self.chardata[startidx:]
-                    continue
-            else:
-                """ We have a valid begining """
-                datalength = ord(self.chardata[3])
-                if len(self.chardata) >= datalength + 4:
-                    """ We have at least a complete packet"""
-                    #print("Debug " + str(len(self.chardata)) + " datalength : " + str(datalength))
-                    if checksum(
-                        [ord(x) for x in self.chardata[4:datalength + 3]]
-                        ) != ord(self.chardata[datalength + 3]):
-                        print("Warning : Invalid checksum for packet : "
-                            + str( [ord(x) for x in self.chardata] ))
-                        validpacket = self.chardata[0:datalength + 4]
-                        self.chardata = self.chardata[datalength + 4:]
-                        continue
-                    else:
-                        validpacket = self.chardata[0:datalength + 4]
-                        self.chardata = self.chardata[datalength + 4:]
-                    # OK, I have now a nice, beautiful, valid packet
-                    data = [ord(x) for x in validpacket]
-                    # print(str(datetime.datetime.now()) + " : " + str(data))
-                    self.newpacket(data)
-                else:
-                    #print("Debug packet : " + str(map(lambda x: ord(x), self.chardata)))
-                    #print("Debug ord(self.chardata[3]) : " + str(datalength))
-                    break
-
 
 class MinidoServerFactory(Factory):
     def __init__(self):

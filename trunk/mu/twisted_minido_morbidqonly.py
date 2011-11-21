@@ -35,9 +35,6 @@ from twisted.web import xmlrpc, server
 from sys import stdout
 from SimpleXMLRPCServer import SimpleXMLRPCServer
 from Queue import Queue
-from minido.db import Db
-from minido.exo import Exo
-from minido.devices import *
 
 # MorbidQ
 from stompservice import StompClientFactory
@@ -49,6 +46,12 @@ from orbited import json
 import datetime
 import time
 import traceback
+
+# minido
+from minido.db import Db
+from minido.exo import Exo
+from minido.devices import *
+from minido.protocol import MinidoProtocol
 
 MORBIDQ_HOST = 'localhost'
 MORBIDQ_PORT = 61613
@@ -155,18 +158,19 @@ class WebService(xmlrpc.XMLRPC):
         print("Get list of devices from DB")
         return(self.factory.minidoprotocol.mydb.get_device_details())
 
-class MinidoProtocol():
+class MinidoProtocolExtended(MinidoProtocol):
     ''' Bus protocol, also used for Minido, D2000 and C2000 '''
     chardata = list()
     def __init__(self):
         self.mydb = Db(self, SQLITEDB)
         self.exodict = self.mydb.populate_exodict()
         self.devdict = self.mydb.populate_devdict()
-        print('MinidoProtocol initialized')
+        print('MinidoProtocolExtended initialized')
         print(self.exodict)
 
     def newpacket(self, data):
         """ Called when a new packet is validated """
+        # self.factory.morbidqFactory.send_data(data)
         print(' '.join(['{0:02x}'.format(x) for x in data]))
         if EXOOFFSET < data[DST] <= EXOOFFSET + 16:
             # This is a packet for an EXO module
@@ -223,16 +227,7 @@ class MinidoProtocol():
                     for x in data[5:-1]])
                 ))
 
-    def send_packet(self, dst, data):
-        valuelist = [0x23, dst, EXIID, len(data) + 1] + data
-        valuelist.append(checksum( data ))
-        print('Debug : sending packet : ', ' '.join(
-            [ '%0.2x' % c for c in valuelist ]))
-        packet = ''.join([chr(x) for x in valuelist])
-        self.transport.write(packet)
-
 class MorbidQClientFactory(StompClientFactory):
- 
     def recv_connected(self, msg):
         self.subscribe(CHANNEL_DISPLAY_NAME)
         self.subscribe(CHANNEL_MINIDO_READ)
@@ -255,7 +250,7 @@ class MorbidQClientFactory(StompClientFactory):
 if __name__ == '__main__':
     from twisted.internet import reactor
     morbidqFactory = MorbidQClientFactory()
-    minidoprotocol = MinidoProtocol()
+    minidoprotocol = MinidoProtocolExtended()
     morbidqFactory.minidoprotocol = minidoprotocol
     ws = WebService()
     ws.morbidqFactory = morbidqFactory
