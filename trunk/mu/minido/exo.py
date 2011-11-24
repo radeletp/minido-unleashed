@@ -1,5 +1,20 @@
 from collections import deque
 import datetime
+EXIID = 0x17
+# Never change the following values, it's only for clarity :
+EXOOFFSET = 0x3B
+EXIOFFSET = 0x13
+CMD = {
+    'EXO_UPDATE': 0x01,
+    'ECHO_REPLY': 0x05,
+    'EXICENT'   : 0x31,
+    'ECHO REQUEST': 0x49,
+    }
+DST = 1
+SRC = 2
+LEN = 3
+COM = 4
+
 class Exo(object):
     """ One instanciation for each physical EXO module """
     # self.history is a tuple of 8 deque containing (date, value) tuples.
@@ -45,9 +60,18 @@ class Exo(object):
         self.mydb.history( now, 'EXO', self.exoid, idx+1, value )
         self.history[ idx ].append( ( now, value ) )
         newdata = [self.history[i][-1][1] for i in range(8)]
-        self.protocol.factory.connection.send_packet( self.exoid + EXOOFFSET, [01] + newdata )
+        # FixMe : The factory shouldn't be called here !!!
+        self.send_packet( self.exoid + EXOOFFSET, [01] + newdata )
         # return [self.history[i][-1][1] for i in range(8)]
         return 'Ok'
+
+    def send_packet(self, dst, data):
+        valuelist = [0x23, dst, EXIID, len(data) + 1] + data
+        # valuelist.append(checksum( data ))
+        print('Debug : sending packet : ', ' '.join(
+            [ '%0.2x' % c for c in valuelist ]))
+        # packet = ''.join([chr(x) for x in valuelist])
+        self.protocol.factory.send_data(valuelist)
 
     def get_output(self, channel):
         """Get status of an EXO output"""
