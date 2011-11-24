@@ -118,7 +118,8 @@ elif args.command[0] == 'listmethods':
 
 
 elif args.command[0] == 'list':
-    result = client.get_device_details()
+    # result = client.get_device_details()
+    result = client.get_device_dict()
     for i in result:
         print(i, result[i])
 elif args.command[0] == 'get':

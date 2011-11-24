@@ -202,8 +202,8 @@ class Db(object):
         # Sample devdict structure :
         # devdict = {'CentreBureau': GenericDevice(
         #   {'power': {'exo':3, 'channel':1}}, type_ = 'Light', ...), ... }
+        # print('exodict : ', self.exodict)
         cur2 = self.conn.cursor()
-        print('exodict : ', self.exodict)
         for row in self.cur:
             devid = str(row[0])
             devtype = row[1]
