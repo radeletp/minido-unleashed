@@ -3,15 +3,28 @@ import sqlite3
 import datetime
 from minido.exo import Exo
 from minido.devices import *
+from twisted.internet import reactor, defer, error
 
 HIST = 5
 class Db(object):
     """ Every access to DB from here """
+    _instance = None
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = super(Db, cls).__new__(cls, *args, **kwargs)
+        return cls._instance
+
     def __init__(self, protocol, sqlitedb):
+        """
+        Open the SQLite DB, and check that all tables are existing
+        otherwise create them.
+        """
         print(sqlitedb, protocol)
         self.sqlitedb = sqlitedb
         self.exodict = dict()
         self.protocol = protocol
+
+        # Open connection to DB
         try:
             self.conn = sqlite3.connect(self.sqlitedb,
                 detect_types=sqlite3.PARSE_DECLTYPES|\
@@ -147,6 +160,8 @@ class Db(object):
         );
         '''))
 
+        self.clean_history()
+        # Obsolete ?
         self.mdev = dict()
 
     def history(self, now, type_, exoid, output, status):
@@ -154,8 +169,24 @@ class Db(object):
         self.cur.execute("INSERT INTO history \
             ( dtime, type, busid, channel, status ) \
             VALUES ( ?, ?, ?, ?, ?)", [now, type_, exoid, output, status])
+        try:
+            self.delayed_commit.reset(5)
+            print("Rescheduled commit 5 seconds from now")
+        except (error.AlreadyCalled, AttributeError):
+            print("Starting a new timer to delay update in the DB")
+            # Initialize the Deferred used for the Deferred Commit
+            self.cdf = defer.Deferred()
+            self.delayed_commit = reactor.callLater(5, self.cdf.callback, None)
+            self.cdf.addCallback(self.commit)
+
 
     def get_device_details(self):
+        """
+        Retrieve devices from the DB (only)
+        Quite similar to populate_devdict.
+        We could probably get rid of it, using the data
+        directly in the devices.
+        """
         self.cur.execute(textwrap.dedent('''
         SELECT output.id, output2device.id, device.id,exo,channel,type,
         cmdtype, devtype, name, floor, room 
@@ -170,7 +201,8 @@ class Db(object):
         return(result)
 
     def populate_exodict(self):
-        """ Retrieve exodict object from the history """
+        """ Retrieve/populate exodict object by replaying
+        the history """
         self.cur.execute("SELECT dtime, busid, channel, status \
             FROM history WHERE type = 'EXO'")
         for row in self.cur:
@@ -232,6 +264,12 @@ class Db(object):
                         }
                 except(KeyError):
                     print('KeyError creating devdict : ', row2[1])
+                    print('Creating the missing Exo')
+                    self.exodict[int(row2[1])] = Exo( 255, int(row2[1]), self, self.protocol, HIST)
+                    channels[ str(row2[0]) ] = {
+                        'exo': self.exodict[int(row2[1])],
+                        'channel': int(row2[2]) 
+                        }
             # End fetch the exo/channels for the device.
             if devtype == 'Light':
                 devdict[ devid ] = GenericDevice( channels, 'Light', name)
@@ -246,6 +284,8 @@ class Db(object):
         return( devdict )
 
     def get_dev_details(self, filter_=None, sort=None):
+        """Get device detail from DB.
+        Probably obsolete also"""
         devdetails = dict()
         self.cur.execute("SELECT id, devtype, name, floor, room, \
             posx, posy, description FROM device")
@@ -261,9 +301,16 @@ class Db(object):
                 posy = row[6],
                 description = row[7]
             )
+    def clean_history(self):
+        """Used at startup to clean history in the DB (last 60 days)"""
+        now = datetime.datetime.now()
+        td = datetime.timedelta( days=-60 )
+        print("Cleaning history")
+        self.cur.execute("DELETE FROM history WHERE dtime < ?", [now + td,])
 
-    def commit(self):
-        """ Commit (used when we have time to do it) """
+    def commit(self, x):
+        """ Commit (Called back after 5 seconds of inactivity on the bus.) """
+        print('Commit into DB')
         self.conn.commit()
 
     def closedb(self):
@@ -271,3 +318,4 @@ class Db(object):
         self.conn.commit()
         self.cur.close()
         self.conn.close()
+
