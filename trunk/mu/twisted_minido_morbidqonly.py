@@ -77,7 +77,13 @@ LEN = 3
 COM = 4
 
 class WebService(xmlrpc.XMLRPC):
-    """ Gather all methods exposed through the SOAP web service """
+    """
+    Gather all methods exposed through the XML-RPC web service
+    Either for the Exo output directly : 
+        self.morbidqFactory.mpd.exodict[exo].get_output(output)
+    Or for the Device :
+        self.morbidqFactory.mpd.devdict[devid].get_value())
+    """
     def xmlrpc_set_output(self, exo, output, value):
         """ change output state """
         try:
@@ -151,18 +157,33 @@ class WebService(xmlrpc.XMLRPC):
         print("Get list of devices from DB")
         return(self.morbidqFactory.mpd.mydb.get_device_details())
 
-class MinidoProtocolDecoder():
-    ''' Bus protocol, also used for Minido, D2000 and C2000 '''
+class MinidoProtocolDecoder(object):
+    """ 
+    AnB protocol (high level), also used for Minido, D2000 and C2000 
+    The constructor builds exodict and devdict from mydb.populate...
+    Is it the right place for this mydb.populate... ?
+    This class is a Singleton
+    """
     chardata = list()
+    _instance = None
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = super(MinidoProtocolDecoder, cls).__new__(cls, *args, **kwargs)
+        return cls._instance
+
     def __init__(self):
         self.mydb = Db(self, SQLITEDB)
         self.exodict = self.mydb.populate_exodict()
         self.devdict = self.mydb.populate_devdict()
-        print('MinidoProtocolExtended initialized')
+        print('MinidoProtocolDecoder Singleton initialized')
         print(self.exodict)
+        print(self.devdict)
 
     def recv_message(self, message):
-        """ Called when a new packet is validated """
+        """
+        Called when a new packet is validated by the protocol (low level).
+        This methods decode the packet
+        """
         print(' '.join(['{0:02x}'.format(x) for x in message]))
         if EXOOFFSET < message[DST] <= EXOOFFSET + 16:
             # This is a packet for an EXO module
@@ -218,6 +239,7 @@ class MinidoProtocolDecoder():
                 ' '.join(['{0:02x}'.format(x) 
                     for x in message[5:-1]])
                 ))
+
 
 class MorbidQClientFactory(StompClientFactory):
     def recv_connected(self, msg):
