@@ -1,11 +1,12 @@
 import textwrap
 import sqlite3
 import datetime
-from minido.exo import Exo
-from minido.devices import *
+# from exo import *
+from devices import *
 from twisted.internet import reactor, defer, error
 
-HIST = 5
+SQLITEDB = "minido_unleashed.db"
+
 class Db(object):
     """ Every access to DB from here """
     _instance = None
@@ -14,23 +15,27 @@ class Db(object):
             cls._instance = super(Db, cls).__new__(cls, *args, **kwargs)
         return cls._instance
 
-    def __init__(self, protocol, sqlitedb):
+    def __init__(self):
         """
         Open the SQLite DB, and check that all tables are existing
         otherwise create them.
         """
-        print(sqlitedb, protocol)
-        self.sqlitedb = sqlitedb
-        self.exodict = dict()
-        self.protocol = protocol
-
-        # Open connection to DB
+        # self.exodict = dict()
+        # Open the DB
         try:
-            self.conn = sqlite3.connect(self.sqlitedb,
+            self.initcount += 1
+        except AttributeError:
+            self.initcount = 0
+
+        if self.initcount > 0:
+            return
+
+        try:
+            self.conn = sqlite3.connect(SQLITEDB,
                 detect_types=sqlite3.PARSE_DECLTYPES|\
                 sqlite3.PARSE_COLNAMES, check_same_thread = False)
         except:
-            print("I am unable to connect to the SQLITE database ( " + str(self.sqlitedb)
+            print("I am unable to connect to the SQLITE database ( " + str(SQLITEDB)
                 + ") , exiting.")
             raise
         self.cur = self.conn.cursor()
@@ -162,22 +167,14 @@ class Db(object):
 
         self.clean_history()
         # Obsolete ?
-        self.mdev = dict()
+        # self.mdev = dict()
 
     def history(self, now, type_, exoid, output, status):
         """ history( now, self.exoid, self.status[i] )"""
         self.cur.execute("INSERT INTO history \
             ( dtime, type, busid, channel, status ) \
             VALUES ( ?, ?, ?, ?, ?)", [now, type_, exoid, output, status])
-        try:
-            self.delayed_commit.reset(5)
-            print("Rescheduled commit 5 seconds from now")
-        except (error.AlreadyCalled, AttributeError):
-            print("Starting a new timer to delay update in the DB")
-            # Initialize the Deferred used for the Deferred Commit
-            self.cdf = defer.Deferred()
-            self.delayed_commit = reactor.callLater(5, self.cdf.callback, None)
-            self.cdf.addCallback(self.commit)
+        self.schedule_commit()
 
 
     def get_device_details(self):
@@ -200,7 +197,7 @@ class Db(object):
             result[row[8]]= row
         return(result)
 
-    def populate_exodict(self):
+    def populate_exodict(self, exodict):
         """ Retrieve/populate exodict object by replaying
         the history """
         self.cur.execute("SELECT dtime, busid, channel, status \
@@ -209,21 +206,13 @@ class Db(object):
             exoid = int(row[1])
             output = int(row[2])
             status = int(row[3])
-            if row[1] in self.exodict:
-                self.exodict[exoid].update_history(row[0], output, status)
-                # print('Updating from DB : ', exoid, output, status)
-            else:
-                print('Exo does not exists, creating it.')
-                statuslist = 8 * [None]
-                statuslist[output - 1] = status
-                self.exodict[exoid] = Exo( 255, exoid, self, self.protocol, HIST)
-                self.exodict[exoid].update_history(row[0], output, status)
-                print('Updating from DB : ', exoid, output, status)
+            if row[1] in exodict:
+                exodict[exoid].update_history(row[0], output, status)
 
         print(datetime.datetime.now(), 'self.exodict restored')
-        return(self.exodict)
+        return(exodict)
 
-    def populate_devdict(self):
+    def populate_devdict(self, exodict):
         """ Retrieve known devices from DB """
         print(('{0!s:.23} : Initialisation : ' +
             'Importing known devices...').format(
@@ -232,6 +221,7 @@ class Db(object):
             posx, posy, description FROM device")
         devdict = dict()
         # Sample devdict structure :
+        # ToDo : Update the following description
         # devdict = {'CentreBureau': GenericDevice(
         #   {'power': {'exo':3, 'channel':1}}, type_ = 'Light', ...), ... }
         # print('exodict : ', self.exodict)
@@ -259,24 +249,19 @@ class Db(object):
                 print(row2)
                 try:
                     channels[ str(row2[0]) ] = {
-                        'exo': self.exodict[int(row2[1])],
+                        'exo': exodict[int(row2[1])],
                         'channel': int(row2[2]) 
                         }
                 except(KeyError):
-                    print('KeyError creating devdict : ', row2[1])
-                    print('Creating the missing Exo')
-                    self.exodict[int(row2[1])] = Exo( 255, int(row2[1]), self, self.protocol, HIST)
-                    channels[ str(row2[0]) ] = {
-                        'exo': self.exodict[int(row2[1])],
-                        'channel': int(row2[2]) 
-                        }
+                    print('Probably major problem in the DB as all exos are in exodict already')
+                    print('Exo ' + str(row2[1]) + ' does not exists in exodict')
             # End fetch the exo/channels for the device.
             if devtype == 'Light':
-                devdict[ devid ] = GenericDevice( channels, 'Light', name)
+                devdict[ devid ] = LightDevice( channels, name)
             elif devtype == 'RCS':
-                devdict[ devid ] = GenericDevice( channels, 'RCS', name)
+                devdict[ devid ] = LightDevice( channels, name)
             elif devtype == 'Store':
-                devdict[ devid ] = StoreDevice( channels, 'Store', name)
+                devdict[ devid ] = StoreDevice( channels, name)
                 print('Debug', devdict[ devid ] , "StoreDevice : ", channels)
         print(('{0!s:.23} : Initialisation : ' +
             'Known devices imported.').format(
@@ -307,6 +292,16 @@ class Db(object):
         td = datetime.timedelta( days=-60 )
         print("Cleaning history")
         self.cur.execute("DELETE FROM history WHERE dtime < ?", [now + td,])
+        self.schedule_commit()
+
+    def schedule_commit(self):
+        try:
+            self.delayed_commit.reset(5)
+        except (error.AlreadyCalled, AttributeError):
+            # Initialize the Deferred used for the Deferred Commit
+            self.cdf = defer.Deferred()
+            self.delayed_commit = reactor.callLater(5, self.cdf.callback, None)
+            self.cdf.addCallback(self.commit)
 
     def commit(self, x):
         """ Commit (Called back after 5 seconds of inactivity on the bus.) """

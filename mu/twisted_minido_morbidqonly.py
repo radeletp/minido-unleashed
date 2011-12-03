@@ -47,9 +47,9 @@ import time
 import traceback
 
 # minido
-from minido.db import Db
-from minido.exo import Exo
-from minido.devices import *
+from db import Db
+from exo import Exo,Exodict
+from devices import *
 # from minido.protocol import MinidoProtocol
 
 MORBIDQ_HOST = 'localhost'
@@ -59,7 +59,6 @@ CHANNEL_DISPLAY_NAME = "/mu/display"
 CHANNEL_MINIDO_WRITE = "/mu/write"
 CHANNEL_MINIDO_READ  = "/mu/read"
 HIST = 5
-SQLITEDB = "minido_unleashed.db"
 EXIID = 0x17
 
 # Never change the following values, it's only for clarity :
@@ -172,12 +171,16 @@ class MinidoProtocolDecoder(object):
         return cls._instance
 
     def __init__(self):
-        self.mydb = Db(self, SQLITEDB)
-        self.exodict = self.mydb.populate_exodict()
-        self.devdict = self.mydb.populate_devdict()
+        # FixMe
+        # Remove the self and the SQLITEDB from the constructor
+        self.mydb = Db()
+        # self.exodict = self.mydb.populate_exodict()
+        print('Creating exodict...')
+        self.exodict = Exodict()
+        # self.exodict = self.mydb.populate_exodict()
+        print('Creating devidct...')
+        self.devdict = self.mydb.populate_devdict(self.exodict)
         print('MinidoProtocolDecoder Singleton initialized')
-        print(self.exodict)
-        print(self.devdict)
 
     def recv_message(self, message):
         """
@@ -204,6 +207,8 @@ class MinidoProtocolDecoder(object):
                         ' do not exist. Creating it.')
                     self.exodict[exoid] = Exo(exiid, 
                         exoid, self.mydb, self, HIST)
+                    # Fixme
+                    # Why exiid to create the Exo ?? Certainly a mistake.
                     self.exodict[exoid].update(exiid, message[5:-1])
         elif EXIOFFSET < message[DST] <= EXIOFFSET + 8:
             # This is a packet for EXI module
@@ -265,6 +270,7 @@ if __name__ == '__main__':
     from twisted.internet import reactor
     morbidqFactory = MorbidQClientFactory()
     morbidqFactory.mpd = MinidoProtocolDecoder()
+    # Is there a better way ??
     morbidqFactory.mpd.factory = morbidqFactory
     ws = WebService()
     ws.morbidqFactory = morbidqFactory
