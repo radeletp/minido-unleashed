@@ -134,6 +134,18 @@ elif args.command[0] == 'set':
         print(result)
     except(xmlrpclib.Fault):
         print('This object does not exists on the server. Please use list command to check')
+elif args.command[0] == 'on':
+    try:
+        result = client.set_device_on(args.command[1])
+        print(result)
+    except(xmlrpclib.Fault):
+        print('This object does not exists on the server. Please use list command to check')
+elif args.command[0] == 'off':
+    try:
+        result = client.set_device_off(args.command[1])
+        print(result)
+    except(xmlrpclib.Fault):
+        print('This object does not exists on the server. Please use list command to check')
 
 elif args.command[0] == 'cancelmode':
     result = client.minido_programming(args.exo, args.output, 'cancel')
