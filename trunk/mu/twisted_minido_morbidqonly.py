@@ -31,9 +31,10 @@
 
 from __future__ import print_function
 from twisted.internet.protocol import Protocol, ReconnectingClientFactory
+from twisted.internet import reactor, defer
 from twisted.web import xmlrpc, server
-from sys import stdout
 from Queue import Queue
+import sys
 
 # MorbidQ
 from stompservice import StompClientFactory
@@ -48,7 +49,7 @@ import traceback
 
 # minido
 from db import Db
-from exo import Exo,Exodict
+from minidodevices import Exo,Exodict,Exi
 from devices import *
 # from minido.protocol import MinidoProtocol
 
@@ -66,14 +67,21 @@ EXOOFFSET = 0x3B
 EXIOFFSET = 0x13
 CMD = {
     'EXO_UPDATE': 0x01,
-    'ECHO_REPLY': 0x05,
     'EXICENT'   : 0x31,
-    'ECHO REQUEST': 0x49,
+    'EXI_ECHO_REQUEST': 0x39,
+    'EXI_ECHO_REPLY': 0x38,
+    'EXO_ECHO_REQUEST': 0x49,
+    'EXO_ECHO_REPLY': 0x05,
     }
 DST = 1
 SRC = 2
 LEN = 3
 COM = 4
+
+def sleep(secs):
+    d = defer.Deferred()
+    reactor.callLater(secs, d.callback, None)
+    return d
 
 class WebService(xmlrpc.XMLRPC):
     """
@@ -95,7 +103,7 @@ class WebService(xmlrpc.XMLRPC):
     def xmlrpc_get_output(self, exo, output):
         """ Get the value of an output """
         try:
-            return(self.morbidqFactory.mpd.exodict[exo].get_output(output))
+            return(self.morbidqFactory.mpd.exodict[exo].status(output))
         except(KeyError):
             return('No such exo in memory')
         return('Unexpected Error')
@@ -132,10 +140,18 @@ class WebService(xmlrpc.XMLRPC):
         # self.protocol.morbidqFactory.connection.send_packet( self.exilist[0], data )
         return(0)
 
-    def xmlrpc_set_device_value(self, devid, value):
+    def xmlrpc_set_device_on(self, devid):
         """ Update the device status """
         print(self.morbidqFactory.mpd.devdict[devid])
-        self.morbidqFactory.mpd.devdict[devid].set_value(value)
+        if self.morbidqFactory.mpd.devdict[devid].type_ == "Light":
+            self.morbidqFactory.mpd.devdict[devid].on()
+        return('Ok')
+
+    def xmlrpc_set_device_off(self, devid):
+        """ Update the device status """
+        print(self.morbidqFactory.mpd.devdict[devid])
+        if self.morbidqFactory.mpd.devdict[devid].type_ == "Light":
+            self.morbidqFactory.mpd.devdict[devid].off()
         return('Ok')
 
     def xmlrpc_get_device_value(self, devid):
@@ -156,7 +172,29 @@ class WebService(xmlrpc.XMLRPC):
         print("Get list of devices from DB")
         return(self.morbidqFactory.mpd.mydb.get_device_details())
 
-class MinidoProtocolDecoder(object):
+
+class MorbidQClientFactory(StompClientFactory):
+    def recv_connected(self, msg):
+        self.subscribe(CHANNEL_DISPLAY_NAME)
+        self.subscribe(CHANNEL_MINIDO_READ)
+        self.mpd = MinidoProtocolDecoder(self.send_data)
+
+    def recv_message(self, msg):
+        message = json.decode(msg['body'])
+        if msg['headers']['destination'] == CHANNEL_DISPLAY_NAME:
+            print(message)
+            if 'ButtonClicked' in message and message['ButtonClicked'] == '1':
+                self.send_data({'ButtonClicked': '2'})
+            if 'ListGroups' in message and message['ListGroups'] == '1':
+                self.send_data({'Group1': 'RDC', 'Group2': 'Etage', 'Group3': 'Grenier'})
+        elif msg['headers']['destination'] == CHANNEL_MINIDO_READ:
+            self.mpd.recv_minido_packet(message)
+ 
+    def send_data(self, data):
+        print("Sending : " + str(data))
+        self.send(CHANNEL_MINIDO_WRITE, json.encode(data))
+ 
+class MinidoProtocolDecoder():
     """ 
     AnB protocol (high level), also used for Minido, D2000 and C2000 
     The constructor builds exodict and devdict from mydb.populate...
@@ -170,73 +208,124 @@ class MinidoProtocolDecoder(object):
             cls._instance = super(MinidoProtocolDecoder, cls).__new__(cls, *args, **kwargs)
         return cls._instance
 
-    def __init__(self):
+    def __init__(self, send_data):
         # FixMe
         # Remove the self and the SQLITEDB from the constructor
         self.mydb = Db()
-        # self.exodict = self.mydb.populate_exodict()
         print('Creating exodict...')
-        self.exodict = Exodict()
-        # self.exodict = self.mydb.populate_exodict()
-        print('Creating devidct...')
+        self.send_data = send_data
+        self.exodict = Exodict(self.send_data)
+        print('Creating exidict...')
+        self.exidict = dict()
+        print('Creating devdict...')
         self.devdict = self.mydb.populate_devdict(self.exodict)
         print('MinidoProtocolDecoder Singleton initialized')
+        self.scan_exi()
+        # self.scan_exo()
 
-    def recv_message(self, message):
+    def recv_minido_packet(self, message):
         """
         Called when a new packet is validated by the protocol (low level).
-        This methods decode the packet
+        This methods decodes the packet
         """
         print(' '.join(['{0:02x}'.format(x) for x in message]))
         if EXOOFFSET < message[DST] <= EXOOFFSET + 16:
-            # This is a packet for an EXO module
+            # This is a packet for an EXO module : EXI2EXO
+            # No need of additional test as EXO2EXO does not exists.
             exoid = message[DST] - EXOOFFSET
             exiid = message[SRC] - EXIOFFSET
+            # EXO_UPDATE :
+            # We must call the exo to check if a change occured.
             if message[COM] == CMD['EXO_UPDATE']:
                 try:
-                    self.exodict[exoid].update(exiid, message[5:-1])
-                    commit_delay = 5
+                    list_of_changes = self.exodict[exoid].update(exiid, message[5:-1])
+                    for change in list_of_changes:
+                        print( ('{0!s:.23} : EXI-{1:02}->EXO-{2:02} : ' + \
+                            'Channel {3:1} = {4:3}  ( was {5:3})').format(
+                            datetime.datetime.now(),
+                            exiid, exoid,
+                            change[0],
+                            change[1],
+                            change[2]
+                            ))
                 except(KeyError):
-                    print(
-                        '{0!s:.23} : The EXO {1:2} does not exist. \
-                        Creating it.'.format(
+                    print("Major error. This should lever happen as all EXO are now created")
+            elif message[COM] == CMD['EXO_ECHO_REQUEST']:
+                print( ('{0!s:.23} : EXI-{1:02}->EXO-{2:02} : ' + \
+                    'EXI2EXO_ECHO_REQUEST').format(
+                    datetime.datetime.now(),
+                    exiid, exoid,
+                    ))
+                # Nothing more to do, as it's probably comming from us.
+
+        elif EXIOFFSET < message[DST] <= EXIOFFSET + 16:
+            # This is a packet to an EXI module
+            exiid = message[DST] - EXIOFFSET
+            if EXOOFFSET < message[SRC] <= EXOOFFSET + 16:
+                # From an EXO module : EXO2EXI
+                exoid = message[SRC] - EXOOFFSET
+                # EXO_ECHO_REPLY
+                if message[COM] == CMD['EXO_ECHO_REPLY']:
+                    print( ( '{0!s:.23} : EXO-{1:02}->MU ' +
+                        'EXO2EXI_ECHO_REPLY').format(
                         datetime.datetime.now(),
-                        exiid)
-                        )
-                    print('Warning : The exo ' + str(exoid) +
-                        ' do not exist. Creating it.')
-                    self.exodict[exoid] = Exo(exiid, 
-                        exoid, self.mydb, self, HIST)
-                    # Fixme
-                    # Why exiid to create the Exo ?? Certainly a mistake.
-                    self.exodict[exoid].update(exiid, message[5:-1])
-        elif EXIOFFSET < message[DST] <= EXIOFFSET + 8:
-            # This is a packet for EXI module
-            print( '{0!s:.23} : SRC-{2:02}->EXI-{1:02} : \
-                CMD:{3:2} DATA:{4!s:10}'.format(
-                datetime.datetime.now(),
-                message[DST] - EXIOFFSET,
-                message[SRC],
-                message[COM],
-                message[5:-1]
-                ))
+                        exoid
+                        ))
+                    self.exodict[exoid].is_present = True
+                else:
+                    print('Problem here. AFAIK an EXO never send anything to EXI \
+                        except for EXO_ECHO_REPLY')
+                    print('{0!s:.23} : EXO-{2:02}->EXI-{1:02} : \
+                        CMD:{3:2} DATA:{4!s:10}'.format(
+                        datetime.datetime.now(),
+                        exiid,exoid,
+                        message[COM],
+                        message[5:-1]
+                        ))
+            else:
+                # From an EXI module : EXI2EXI
+                if message[COM] == CMD['EXI_ECHO_REQUEST']:
+                    print( '{0!s:.23} : EXI-{2:02}->EXI-{1:02} : \
+                        EXI2EXI_ECHO_REQUEST'.format(
+                        datetime.datetime.now(),
+                        message[DST] - EXIOFFSET,
+                        message[SRC] - EXIOFFSET,
+                        ))
+                elif message[COM] == CMD['EXI_ECHO_REPLY']:
+                    srcexiid = message[SRC] - EXIOFFSET
+                    print( '{0!s:.23} : EXI-{2:02}->EXI-{1:02} : \
+                        EXI2EXI_ECHO_REPLY'.format(
+                        datetime.datetime.now(),
+                        message[DST] - EXIOFFSET,
+                        srcexiid,
+                        ))
+                    self.exidict[srcexiid] = Exi(self.send_data)
+                else:
+                    print( '{0!s:.23} : SRC-{2:02}->EXI-{1:02} : \
+                        CMD:{3:2} DATA:{4!s:10}'.format(
+                        datetime.datetime.now(),
+                        message[DST] - EXIOFFSET,
+                        message[SRC],
+                        message[COM],
+                        message[5:-1]
+                        ))
         elif message[DST] == 0x0b:
             # This is a packet for the D2000
             if message[COM] == CMD['EXICENT'] and \
                 message[SRC]-EXIOFFSET == message[5:-1][0]:
-                # This is an exi packet
-                # I don't undestand by the EXI info is twice.
+                # This is packet normally used by D2000
+                # The EXI info is twice in the packet, 
+                # that's why we make the second check.
                 print( ( '{0!s:.23} : EXI-{1:02}->D-2000 : ' +
-                    'Button {2:2} ( EXI from message {3:02} )').format(
+                    'Button {2:2}').format(
                     datetime.datetime.now(),
                     message[SRC]-EXIOFFSET,
                     message[6],
-                    message[5]
                     ))
         else:
             print( ( '{0!s:.23} : SRC-{2:02x}->DST-{1:02x} : ' +
                 'Unable to decode - ' +
-                'CMD:{3:02x} DATA:{4!s:10}' ).format(
+                'CMD (hex):{3:02x} DATA (hex):{4!s:10}' ).format(
                 datetime.datetime.now(),
                 message[DST],
                 message[SRC],
@@ -245,33 +334,50 @@ class MinidoProtocolDecoder(object):
                     for x in message[5:-1]])
                 ))
 
+    def send_packet(self, data):
+        self.send_data(data)
 
-class MorbidQClientFactory(StompClientFactory):
-    def recv_connected(self, msg):
-        self.subscribe(CHANNEL_DISPLAY_NAME)
-        self.subscribe(CHANNEL_MINIDO_READ)
+    def send_command(self, dst, cmd, cmd_data = list(), src = EXIID):
+        """
+        This is a helper to build packet.
+        """
+        packet = [ 35, dst, src, len(cmd_data) + 2, cmd ] + cmd_data
+        self.send_data(packet)
 
-    def recv_message(self, msg):
-        message = json.decode(msg['body'])
-        if msg['headers']['destination'] == CHANNEL_DISPLAY_NAME:
-            print(message)
-            if 'ButtonClicked' in message and message['ButtonClicked'] == '1':
-                self.send_data({'ButtonClicked': '2'})
-            if 'ListGroups' in message and message['ListGroups'] == '1':
-                self.send_data({'Group1': 'RDC', 'Group2': 'Etage', 'Group3': 'Grenier'})
-        elif msg['headers']['destination'] == CHANNEL_MINIDO_READ:
-            self.mpd.recv_message(message)
- 
-    def send_data(self, data):
-        print("Debug temporary : " + str(data))
-        self.send(CHANNEL_MINIDO_WRITE, json.encode(data))
- 
+    def scan_exo(self):
+        self.d = defer.Deferred()
+        self.exo = 1
+        def scanNext():
+            if self.exo >= 16:
+                self.loop.stop()
+                self.d.callback(None)
+            self.send_command(self.exo + EXOOFFSET, CMD['EXO_ECHO_REQUEST'])
+            self.exo += 1
+        self.loop = LoopingCall(scanNext)
+        self.loop.start(0.1)
+
+    def scan_exi(self):
+        """
+        First scan the EXI
+        Check answers to make sure we do not use an EXIID
+        that is already used by a real EXI
+        """
+        self.exid = defer.Deferred()
+        self.exi = 1
+        def scanNext():
+            if self.exi >= 16:
+                self.exiloop.stop()
+                self.exid.callback(None)
+            packet = [35, 00, 11, 2, CMD['EXI_ECHO_REQUEST']]
+            packet[1] = self.exi + EXIOFFSET
+            self.send_command(self.exi + EXIOFFSET, CMD['EXI_ECHO_REQUEST'])
+            self.exi += 1
+        self.exiloop = LoopingCall(scanNext)
+        self.exiloop.start(0.1)
+
 if __name__ == '__main__':
     from twisted.internet import reactor
     morbidqFactory = MorbidQClientFactory()
-    morbidqFactory.mpd = MinidoProtocolDecoder()
-    # Is there a better way ??
-    morbidqFactory.mpd.factory = morbidqFactory
     ws = WebService()
     ws.morbidqFactory = morbidqFactory
     xmlrpc.addIntrospection(ws)
