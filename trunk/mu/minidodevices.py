@@ -79,7 +79,7 @@ class Exo(object):
                     self.history[i].append( ( now, statuslist[i] ) )
                     # But is it the right place to update the db history ?
                     self.mydb.history( now, 'EXO', self.exoid, i+1, statuslist[i] )
-                    list_of_changes.append((i, statuslist[i], self.history[i][-2][1]))
+                    list_of_changes.append((i+1, statuslist[i], self.history[i][-2][1]))
             except IndexOutOfRange:
                 print("No history yet for this Output.")
         return list_of_changes
