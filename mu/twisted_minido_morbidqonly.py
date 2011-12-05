@@ -18,6 +18,25 @@
 
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+    Numbering rules for Exi, Exo, channel / output : from 1 ( to 8 or 16 )
+    Channel is a tupple to point an output (1-8) on a particular Exo (1-16)
+
+    Improvements since 1.x series :
+    - All in memory design (low latency)
+    - Twisted Network event based framework (low latency, no unsafe threads to 
+          access shared resources.)
+    - Correct use of data types, use mutables types when necessary, use integers
+          to compute & store exo status. Banned string concatenations. (speed)
+    - Full UTF-8 DB
+    - Auto Discovery, basic functions on new Minido installations.
+    - Centred on a Message Broker using STOMP for agility. Can easily
+          remove is performance impact noticed.
+    - STP everywhere we can, up to the web browser with Orbited Comet library.
+    - Object Oriented design for ease of maintenance.
+    - Clean code & readability matters for ease of maintenance.
+    - Web service XMLRPC
+    - STOMP to communicate asynchronously
 """
 
 ###############################################################################
@@ -25,7 +44,7 @@
 #  * Implement serial adapter (not only tcp/ip)                               #
 #  * History for EXI also as with EXO                                         #
 #  * Mettre à jour les tables exi_id2output et exi                            #
-#                                                                             #
+#  * Implement action testing                                                 #
 #                                                                             #
 ###############################################################################
 
@@ -62,7 +81,7 @@ CHANNEL_MINIDO_READ  = "/mu/read"
 HIST = 5
 EXIID = 0x17
 
-# Never change the following values, it's only for clarity :
+# Never change the following values, it's only for readability of the code:
 EXOOFFSET = 0x3B
 EXIOFFSET = 0x13
 CMD = {
@@ -119,25 +138,29 @@ class WebService(xmlrpc.XMLRPC):
 
     def xmlrpc_minido_programming(self, exo, output, mode):
         """ Set an exo output in Learn, Delete or stop Learn/Delete mode."""
-        data = [0x31]
+        data = list()
         if mode == "add":
             print('Entering learning mode (add) for exo ' + str(exo)
                 + ' output ' + str(output))
-            data.append( 0x01 )
+            #data.append( 0x01 )
+            data = [0x01]
         elif mode == "cancel":
             print('Cancelling learn or delete mode for exo ' + str(exo)
                 + ' output ' + str(output))
-            data.append( 0x00 )
+            #data.append( 0x00 )
+            data = [0x00]
         elif mode == "remove":
             print('Entering delete mode (remove) for exo ' + str(exo)
                 + ' output ' + str(output))
-            data.append( 0x02 )
+            #data.append( 0x02 )
+            data = [0x02]
         data.append( exo )
         data.append( output-1 )
         data.append( 0x00 )
         self.exilist = [0x14, 0x15, 0x16, 0x18]
         # Todo : Add a loop, once sure of the code.
         # self.protocol.morbidqFactory.connection.send_packet( self.exilist[0], data )
+        self.morbidqFactory.mpd.send_command( 0x16, 0x31, data )
         return(0)
 
     def xmlrpc_set_device_on(self, devid):
@@ -241,7 +264,7 @@ class MinidoProtocolDecoder():
                     list_of_changes = self.exodict[exoid].update(exiid, message[5:-1])
                     for change in list_of_changes:
                         print( ('{0!s:.23} : EXI-{1:02}->EXO-{2:02} : ' + \
-                            'Channel {3:1} = {4:3}  ( was {5:3})').format(
+                            'Output {3:1} = {4:3}  ( was {5:3})').format(
                             datetime.datetime.now(),
                             exiid, exoid,
                             change[0],
