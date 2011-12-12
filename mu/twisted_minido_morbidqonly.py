@@ -68,7 +68,7 @@ import traceback
 
 # minido
 from db import Db
-from minidodevices import Exo,Exodict,Exi
+from minidodevices import Exo, Exodict, Exi
 from devices import *
 # from minido.protocol import MinidoProtocol
 
@@ -97,32 +97,32 @@ SRC = 2
 LEN = 3
 COM = 4
 
-def sleep(secs):
-    d = defer.Deferred()
-    reactor.callLater(secs, d.callback, None)
-    return d
-
 class WebService(xmlrpc.XMLRPC):
     """
     Gather all methods exposed through the XML-RPC web service
     Either for the Exo output directly : 
-        self.morbidqFactory.mpd.exodict[exo].get_output(output)
+        self.morbidq_factory.mpd.exodict[exo].get_output(output)
     Or for the Device :
-        self.morbidqFactory.mpd.devdict[devid].get_value())
+        self.morbidq_factory.mpd.devdict[devid].get_value())
+
+    pylint option block-disable=W0101
+    pylint option block-disable=E0602
     """
     def xmlrpc_set_output(self, exo, output, value):
         """ change output state """
         try:
-            newdata = self.morbidqFactory.mpd.exodict[exo].set_output(int(output), int(value))
+            newdata = self.morbidq_factory.mpd.exodict[exo].set_output(
+                int(output), int(value))
         except(KeyError):
             pass
         return(newdata)
-        xmlrpc_set_output.signature = [['int', 'int', 'string', 'int', 'string']]
+        xmlrpc_set_output.signature = [['int', 'int', 'string', 
+            'int', 'string']]
 
     def xmlrpc_get_output(self, exo, output):
         """ Get the value of an output """
         try:
-            return(self.morbidqFactory.mpd.exodict[exo].status(output))
+            return(self.morbidq_factory.mpd.exodict[exo].status(output))
         except(KeyError):
             return('No such exo in memory')
         return('Unexpected Error')
@@ -131,7 +131,7 @@ class WebService(xmlrpc.XMLRPC):
 
     def xmlrpc_list_exo(self):
         """ Return the list of EXO currently known by MU """
-        exolist = list(iter(self.morbidqFactory.mpd.exodict))
+        exolist = list(iter(self.morbidq_factory.mpd.exodict))
         return(exolist)
         xmlrpc_list_exo.signature = [['None', 'list']]
         xmlrpc_list_exo.help = "Return the list of EXO currently known by MU"
@@ -158,42 +158,41 @@ class WebService(xmlrpc.XMLRPC):
         data.append( output-1 )
         data.append( 0x00 )
         self.exilist = [0x14, 0x15, 0x16, 0x18]
-        # Todo : Add a loop, once sure of the code.
-        # self.protocol.morbidqFactory.connection.send_packet( self.exilist[0], data )
-        self.morbidqFactory.mpd.send_command( 0x16, 0x31, data )
+        for exi in self.exilist:
+            self.morbidq_factory.mpd.send_command( exi, 0x31, data )
         return(0)
 
     def xmlrpc_set_device_on(self, devid):
         """ Update the device status """
-        print(self.morbidqFactory.mpd.devdict[devid])
-        if self.morbidqFactory.mpd.devdict[devid].type_ == "Light":
-            self.morbidqFactory.mpd.devdict[devid].on()
+        print(self.morbidq_factory.mpd.devdict[devid])
+        if self.morbidq_factory.mpd.devdict[devid].type_ == "Light":
+            self.morbidq_factory.mpd.devdict[devid].on()
         return('Ok')
 
     def xmlrpc_set_device_off(self, devid):
         """ Update the device status """
-        print(self.morbidqFactory.mpd.devdict[devid])
-        if self.morbidqFactory.mpd.devdict[devid].type_ == "Light":
-            self.morbidqFactory.mpd.devdict[devid].off()
+        print(self.morbidq_factory.mpd.devdict[devid])
+        if self.morbidq_factory.mpd.devdict[devid].type_ == "Light":
+            self.morbidq_factory.mpd.devdict[devid].off()
         return('Ok')
 
     def xmlrpc_get_device_value(self, devid):
         """ Get devices state """
-        return(str(self.morbidqFactory.mpd.devdict[devid].get_value()))
+        return(str(self.morbidq_factory.mpd.devdict[devid].get_value()))
 
     def xmlrpc_get_device_dict(self):
         """ Get list of devices """
         print("Get list of devices from devdict")
         result = dict()
-        for key in self.morbidqFactory.mpd.devdict.keys():
-            result[key] = str(self.morbidqFactory.mpd.devdict[key])
+        for key in self.morbidq_factory.mpd.devdict.keys():
+            result[key] = str(self.morbidq_factory.mpd.devdict[key])
         print(result)
         return(result)
 
     def xmlrpc_get_device_details(self):
         """ List devices from DB """
         print("Get list of devices from DB")
-        return(self.morbidqFactory.mpd.mydb.get_device_details())
+        return(self.morbidq_factory.mpd.mydb.get_device_details())
 
 
 class MorbidQClientFactory(StompClientFactory):
@@ -209,7 +208,8 @@ class MorbidQClientFactory(StompClientFactory):
             if 'ButtonClicked' in message and message['ButtonClicked'] == '1':
                 self.send_data({'ButtonClicked': '2'})
             if 'ListGroups' in message and message['ListGroups'] == '1':
-                self.send_data({'Group1': 'RDC', 'Group2': 'Etage', 'Group3': 'Grenier'})
+                self.send_data({'Group1': 'RDC', 
+                    'Group2': 'Etage', 'Group3': 'Grenier'})
         elif msg['headers']['destination'] == CHANNEL_MINIDO_READ:
             self.mpd.recv_minido_packet(message)
  
@@ -228,7 +228,8 @@ class MinidoProtocolDecoder():
     _instance = None
     def __new__(cls, *args, **kwargs):
         if not cls._instance:
-            cls._instance = super(MinidoProtocolDecoder, cls).__new__(cls, *args, **kwargs)
+            cls._instance = super(MinidoProtocolDecoder, cls).__new__(cls, 
+                *args, **kwargs)
         return cls._instance
 
     def __init__(self, send_data):
@@ -261,7 +262,8 @@ class MinidoProtocolDecoder():
             # We must call the exo to check if a change occured.
             if message[COM] == CMD['EXO_UPDATE']:
                 try:
-                    list_of_changes = self.exodict[exoid].update(exiid, message[5:-1])
+                    list_of_changes = self.exodict[exoid].update(exiid, 
+                        message[5:-1])
                     for change in list_of_changes:
                         print( ('{0!s:.23} : EXI-{1:02}->EXO-{2:02} : ' + \
                             'Output {3:1} = {4:3}  ( was {5:3})').format(
@@ -272,7 +274,7 @@ class MinidoProtocolDecoder():
                             change[2]
                             ))
                 except(KeyError):
-                    print("Major error. This should lever happen as all EXO are now created")
+                    print("This should never happen : all EXO are created")
             elif message[COM] == CMD['EXO_ECHO_REQUEST']:
                 print( ('{0!s:.23} : EXI-{1:02}->EXO-{2:02} : ' + \
                     'EXI2EXO_ECHO_REQUEST').format(
@@ -296,8 +298,8 @@ class MinidoProtocolDecoder():
                         ))
                     self.exodict[exoid].is_present = True
                 else:
-                    print('Problem here. AFAIK an EXO never send anything to EXI \
-                        except for EXO_ECHO_REPLY')
+                    print('Problem here. AFAIK an EXO never send anything \
+                        to EXI except for EXO_ECHO_REPLY')
                     print('{0!s:.23} : EXO-{2:02}->EXI-{1:02} : \
                         CMD:{3:2} DATA:{4!s:10}'.format(
                         datetime.datetime.now(),
@@ -400,10 +402,10 @@ class MinidoProtocolDecoder():
 
 if __name__ == '__main__':
     from twisted.internet import reactor
-    morbidqFactory = MorbidQClientFactory()
+    morbidq_factory = MorbidQClientFactory()
     ws = WebService()
-    ws.morbidqFactory = morbidqFactory
+    ws.morbidq_factory = morbidq_factory
     xmlrpc.addIntrospection(ws)
     reactor.listenTCP( 8000, server.Site(ws) )
-    reactor.connectTCP(MORBIDQ_HOST, MORBIDQ_PORT, morbidqFactory)
+    reactor.connectTCP(MORBIDQ_HOST, MORBIDQ_PORT, morbidq_factory)
     reactor.run()
