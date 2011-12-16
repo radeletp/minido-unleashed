@@ -199,6 +199,7 @@ class MorbidQClientFactory(StompClientFactory):
     def recv_connected(self, msg):
         self.subscribe(CHANNEL_DISPLAY_NAME)
         self.subscribe(CHANNEL_MINIDO_READ)
+        # mpd is reinitialized at every STOMP server reconnection
         self.mpd = MinidoProtocolDecoder(self.send_data)
 
     def recv_message(self, msg):
@@ -216,6 +217,10 @@ class MorbidQClientFactory(StompClientFactory):
     def send_data(self, data):
         print("Sending : " + str(data))
         self.send(CHANNEL_MINIDO_WRITE, json.encode(data))
+
+    def clientConnectionLost(self, connector, reason):
+        time.sleep(1.0)
+        reactor.connectTCP(MORBIDQ_HOST, MORBIDQ_PORT, self)
  
 class MinidoProtocolDecoder():
     """ 
@@ -223,6 +228,12 @@ class MinidoProtocolDecoder():
     The constructor builds exodict and devdict from mydb.populate...
     Is it the right place for this mydb.populate... ?
     This class is a Singleton
+    This class :
+        - Initialize DB
+        - Initialize exodict
+        - Initialize exidict
+        - Initialize devdict
+        - Scan the EXI
     """
     chardata = list()
     _instance = None
