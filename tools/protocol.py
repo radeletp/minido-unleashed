@@ -150,12 +150,4 @@ class MinidoProtocol(Protocol):
 
     def keepalive(self):
          self.send_data([0x31, 0x00, 0x00, 0x01, 0x00])
-#        Looks like the following code is now useless.
-#        try:
-#            print("Keepalive")
-#            self.send_data([0x31, 0x00, 0x00, 0x01, 0x00])
-#        except:
-#            # Not nice, but we must evate all errors, as it's just a keepalive and
-#            # might fail for many reasons, including during initialization.
-#            pass
  

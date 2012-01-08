@@ -82,14 +82,16 @@ class MorbidQClientFactory(StompClientFactory):
         message = json.decode(msg['body'])
         if msg['headers']['destination'] == CHANNEL_MINIDO_WRITE:
             if type(message) is list:
-                print("STOMP to RS485 :", message)
+                print("STOMP to RS485 : %s" % (
+                    ' '.join(map(lambda i: '{0:02X}'.format(i),message))))
                 for conn in self.minido_factory.connections:
                     conn.send_data(message)
                 # Also copy it for other listeners.
                 self.send(CHANNEL_MINIDO_READ, json.encode(message))
  
     def send_data(self, message):
-        print("RS485 to STOMP : " + str(message))
+        print("RS485 to STOMP : %s" % (
+            ' '.join(map(lambda i: '{0:02X}'.format(i),message))))
         self.send(CHANNEL_MINIDO_READ, json.encode(message))
     
     def clientConnectionLost(self, connector, reason):
