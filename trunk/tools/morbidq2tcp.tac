@@ -88,6 +88,7 @@ class MinidoServerFactory(Factory):
         ReconnectingClientFactory.clientConnectionFailed(self, connector,
                                                          reason)
     def recv_message(self, message):
+        print(': TCP to STOMP : %s' % (' '.join(map(lambda i: '{0:02X}'.format(i),message))))
         self.morbidqFactory.send_data(message)
  
 class MorbidQClientFactory(StompClientFactory):
@@ -98,7 +99,9 @@ class MorbidQClientFactory(StompClientFactory):
         message = json.decode(msg['body'])
         if msg['headers']['destination'] == CHANNEL_MINIDO_READ:
             if type(message) is list:
-                print(": Sending to", len(self.minidoFactory.connections),"tcp client(s) :", message)
+                print(": STOMP to %i TCP client(s) : %s" % (
+                    len(self.minidoFactory.connections), 
+                    ' '.join(map(lambda i: '{0:02X}'.format(i),message))))
                 for conn in self.minidoFactory.connections:
                     conn.send_data(message)
  
