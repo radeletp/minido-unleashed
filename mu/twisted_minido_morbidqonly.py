@@ -78,6 +78,7 @@ CHANNEL_MINIDO_NAME  = "/mu/minido"
 CHANNEL_DISPLAY_NAME = "/mu/display"
 CHANNEL_MINIDO_WRITE = "/mu/write"
 CHANNEL_MINIDO_READ  = "/mu/read"
+CHANNEL_MINIDO_LAYOUT  = "/mu/layout"
 HIST = 5
 EXIID = 0x17
 
@@ -199,6 +200,7 @@ class MorbidQClientFactory(StompClientFactory):
     def recv_connected(self, msg):
         self.subscribe(CHANNEL_DISPLAY_NAME)
         self.subscribe(CHANNEL_MINIDO_READ)
+        self.subscribe(CHANNEL_MINIDO_LAYOUT)
         # mpd is reinitialized at every STOMP server reconnection
         self.mpd = MinidoProtocolDecoder(self.send_data)
 
@@ -213,6 +215,14 @@ class MorbidQClientFactory(StompClientFactory):
                     'Group2': 'Etage', 'Group3': 'Grenier'})
         elif msg['headers']['destination'] == CHANNEL_MINIDO_READ:
             self.mpd.recv_minido_packet(message)
+        elif msg['headers']['destination'] == CHANNEL_MINIDO_LAYOUT:
+            if 'query' in message.keys():
+                if message['query'] == 'getLayout':
+                    self.send(CHANNEL_MINIDO_LAYOUT, 
+                        json.encode({'layout': self.mpd.devdict}))
+                elif message['query'] == 'getStatus':
+                    self.send(CHANNEL_MINIDO_LAYOUT, 
+                        json.encode({'status': 'This is a status line'}))
  
     def send_data(self, data):
         print("Sending : " + str(data))
