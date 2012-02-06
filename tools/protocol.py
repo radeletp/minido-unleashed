@@ -26,6 +26,7 @@
 from twisted.internet.protocol import Protocol
 from twisted.internet import task
 import datetime
+import time
 
 def checksum(datalist):
     """ Calculate an XOR checksum """
@@ -49,6 +50,8 @@ class MinidoProtocol(Protocol):
         print('MinidoProtocol initialized')
         self.factory.connections = list()
         self.kalive = kalive
+        self.lastmsgtime = ( datetime.datetime.now() 
+            - datetime.timedelta(microseconds=10000))
 
     def connectionMade(self):
         print(str(datetime.datetime.now()) + " :" +
@@ -72,8 +75,14 @@ class MinidoProtocol(Protocol):
     def newpacket(self, data):
         """ Called when a new packet is validated """
         self.factory.recv_message(data)
+        self.lastmsgtime = datetime.datetime.now()
 
     def send_data(self, data):
+        timed = datetime.datetime.now() - self.lastmsgtime 
+        if timed < datetime.timedelta(microseconds=10000):
+            print('Delayed send_data by 0.01s')
+            time.sleep(0.01)
+        self.lastmsgtime = datetime.datetime.now()
         if data[len(data)-1] == checksum( data[4:(len(data)-1)]):
             # print(str(datetime.datetime.now()) + " : ",
             #     ' '.join([ '%0.2x' % c for c in data ]))
