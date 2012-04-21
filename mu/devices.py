@@ -8,6 +8,42 @@ class GenericDevice(object):
         return "Device : type {0} name {1} channels {2!s}".format(
             self.type_, self.name, self.channels)
 
+class DefaultDevice(GenericDevice):
+    """ Light states & methods """
+    def __init__(self, channels, name):
+
+        self.channels = channels
+        self.type_ = 'Default'
+        self.name = name
+
+    def on(self):
+        """ Set device status """
+        exo = self.channels['power']['exo']
+        channel = self.channels['power']['channel']
+        print("exo.set_output(channel, 255)")
+        exo.set_output(channel, 255)
+
+    def off(self):
+        """ Set device status """
+        exo = self.channels['power']['exo']
+        channel = self.channels['power']['channel']
+        print("exo.set_output(channel, 0)")
+        exo.set_output(channel, 0)
+
+    def toggle(self):
+        """ Set device status """
+        exo = self.channels['power']['exo']
+        channel = self.channels['power']['channel']
+        if exo.get_output(channel) == 0:
+            exo.set_output(channel, 255)
+        else:
+            exo.set_output(channel, 0)
+
+    def status(self):
+        """ Get device status """
+        exo = self.channels['power']['exo']
+        return(exo.get_output(self.channels['power']['channel']))
+
 class LightDevice(GenericDevice):
     """ Light states & methods """
     def __init__(self, channels, name):
