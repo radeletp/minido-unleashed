@@ -230,14 +230,14 @@ class Db(object):
             devid = str(row[0])
             devtype = row[1]
             name = row[2]
-        #            devdetails[devid] = dict(
-        #                name = row[2],
-        #                floor = str(row[3]),
-        #                room = str(row[4]),
-        #                posx = row[5],
-        #                posy = row[6],
-        #                description = row[7]
-        #            )
+            devdetails[devid] = dict(
+                name = row[2],
+                floor = str(row[3]),
+                room = str(row[4]),
+                posx = row[5],
+                posy = row[6],
+                description = row[7]
+            )
             # Fetch the exo/channels for the device.
             channels = dict()
             print('devid : ', row[0], ' devtype : ', row[1], ' name ', row[2])
@@ -257,11 +257,11 @@ class Db(object):
                     print('Exo ' + str(row2[1]) + ' does not exists in exodict')
             # End fetch the exo/channels for the device.
             if devtype == 'Light':
-                devdict[ devid ] = LightDevice( channels, name)
+                devdict[ devid ] = LightDevice( channels, name, devdetails)
             elif devtype == 'RCS':
-                devdict[ devid ] = LightDevice( channels, name)
+                devdict[ devid ] = LightDevice( channels, name, devdetails)
             elif devtype == 'Store':
-                devdict[ devid ] = StoreDevice( channels, name)
+                devdict[ devid ] = StoreDevice( channels, name, devdetails)
                 print('Debug', devdict[ devid ] , "StoreDevice : ", channels)
         print(('{0!s:.23} : Initialisation : ' +
             'Known devices imported.').format(

@@ -201,6 +201,7 @@ class MorbidQClientFactory(StompClientFactory):
         self.subscribe(CHANNEL_DISPLAY_NAME)
         self.subscribe(CHANNEL_MINIDO_READ)
         self.subscribe(CHANNEL_MINIDO_LAYOUT)
+        self.subscribe(CHANNEL_xPL)
         # mpd is reinitialized at every STOMP server reconnection
         self.mpd = MinidoProtocolDecoder(self.send_data)
 
@@ -219,7 +220,7 @@ class MorbidQClientFactory(StompClientFactory):
             if 'query' in message.keys():
                 if message['query'] == 'getLayout':
                     self.send(CHANNEL_MINIDO_LAYOUT, 
-                        json.encode({'layout': self.mpd.devdict}))
+                        json.encode({'layout': self.mpd.devdict.keys()}))
                 elif message['query'] == 'getStatus':
                     self.send(CHANNEL_MINIDO_LAYOUT, 
                         json.encode({'status': 'This is a status line'}))
@@ -231,6 +232,19 @@ class MorbidQClientFactory(StompClientFactory):
     def clientConnectionLost(self, connector, reason):
         time.sleep(1.0)
         reactor.connectTCP(MORBIDQ_HOST, MORBIDQ_PORT, self)
+
+    def layout(self, devdict):
+        res = dict()
+        for key in devdict.keys():
+            id_ = key
+            floor = devdict[key].floor
+            room = 
+            name = devdict[key].name
+            functions = list()
+            for f in dir(devdict[key])
+                pass
+        return res
+
  
 class MinidoProtocolDecoder():
     """ 
