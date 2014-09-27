@@ -187,18 +187,6 @@ Please check minido on project kenai for documentation.
 2010-08-25 10:20:29.166131 : 23 0b 14 04 31 01 01 31
 2010-08-25 10:20:29.166322 : 23 3e 14 0a 01 ff 00 00 00 00 00 00 00 fe
 
-}}}
-
-
-
-
-
-
-
-
-
-
-
 
 
 - Probablement un scan du boîtier :
@@ -235,3 +223,5 @@ Please check minido on project kenai for documentation.
 2010-08-25 10:01:58.049501 : 23 4b 01 02 49 49
 
 pivert@pivert-desktop:~/Documents/minido$ 
+
+}}}
